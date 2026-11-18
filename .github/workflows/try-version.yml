@@ -1,0 +1,58 @@
+# temporary: checks one cache version on its own address before it's promoted; deleted after
+# wxtop-cache health: every 15 minutes (GitHub sometimes runs schedules late or skips one when busy), ask the cache what the page asks it (with the page's Origin) and fail loudly if it's broken.
+# A failed run emails whoever last changed this schedule (GitHub's own notification for scheduled workflows).
+# Checks: /api/stats answers; a METAR (only reachable through the cache) answers; a deliberate miss is fetched and answered.
+# A readable error from the cache itself on the miss (the service was slow or refused) is a warning, not a failure:
+# that's the service, not the cache. A Spacefast error (e.g. zero_js_execution_failed), no CORS header or no answer is a failure.
+name: try a cache version
+on:
+  push:
+    paths: [".github/workflows/try-version.yml"]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Check wxtop-cache
+        shell: bash
+        run: |
+          set +e -u +o pipefail  # GitHub runs bash -e -o pipefail: a check that fails must not stop the others or the summary
+          C=https://wxtop-cache--v15.space.fast
+          O="Origin: https://wxtop.space.fast"
+          enc() { python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$1"; }
+          bad=0; warn=0; out=""
+          line() { out="$out$1"$'\n'; echo "$1"; }
+          ask() { # $1 label, $2 url; sets S (status), H (headers), B (body)
+            S=$(curl -sS -m 20 -D /tmp/h -o /tmp/b -w '%{http_code}' -H "$O" "$2" 2>/tmp/e || echo 000)
+            H=$(tr -d '\r' </tmp/h 2>/dev/null); B=$(head -c 300 /tmp/b 2>/dev/null | tr '\n' ' ')
+          }
+          cors() { grep -qi '^access-control-allow-origin: https://wxtop.space.fast' <<<"$H"; }
+
+          checks() {
+          ask stats "$C/api/stats"
+          V=$(grep -i '^x-spacefast-version:' <<<"$H" | cut -d' ' -f2)
+          if [ "$S" = 200 ] && grep -q '"answers"' /tmp/b; then line "✅ stats: 200 · version $V"
+          else line "❌ stats: HTTP $S · ${B:0:200}"; bad=1; fi
+
+          ask metar "$C/api/c?u=$(enc 'https://aviationweather.gov/api/data/metar?format=json&ids=KJFK')"
+          X=$(grep -i '^x-cache:' <<<"$H" | cut -d' ' -f2)
+          if [ "$S" = 200 ] && cors && grep -q 'KJFK' /tmp/b; then line "✅ METAR (KJFK): 200 · $X"
+          else line "❌ METAR (KJFK): HTTP $S · ${B:0:200}"; bad=1; fi
+
+          # a miss: air quality at a point that changes every run (2 decimals, as the page asks)
+          n=$((GITHUB_RUN_NUMBER % 3000)); la=$(printf '%d.%02d' $((30 + n / 100)) $((n % 100)))
+          A="https://air-quality-api.open-meteo.com/v1/air-quality?latitude=$la&longitude=-80.00&timezone=auto&current=us_aqi,european_aqi,pm2_5,pm10,ozone,nitrogen_dioxide,sulphur_dioxide,carbon_monoxide,dust&hourly=us_aqi&forecast_hours=48"
+          ask miss "$C/api/c?u=$(enc "$A")"
+          X=$(grep -i '^x-cache:' <<<"$H" | cut -d' ' -f2)
+          if [ "$S" = 200 ] && cors; then line "✅ miss (air, $la,-80): 200 · $X"
+          elif cors && grep -q '"error"' /tmp/b && ! grep -q 'spacefast.com/docs/errors' /tmp/b; then line "⚠️ miss (air): HTTP $S from the cache, the service was slow or refused · ${B:0:160}"; warn=1
+          else line "❌ miss (air): HTTP $S · ${B:0:200}"; bad=1; fi
+          }
+          checks
+          if [ $bad = 1 ]; then line "… trying again in 20 s"; sleep 20; bad=0; warn=0; checks; fi
+
+          { echo "### wxtop-cache"; echo; echo "$out"; } >>"$GITHUB_STEP_SUMMARY"
+          if [ $bad = 1 ]; then echo "::error::wxtop-cache is unhealthy"; exit 1; fi
+          if [ $warn = 1 ]; then echo "::warning::a service was slow, the cache answered"; fi
