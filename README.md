@@ -3,7 +3,7 @@
 Watches [wxtop](https://wxtop.space.fast/)'s shared cache, wxtop-cache (`https://wxtop-cache.space.fast`), from GitHub Actions.
 It's a public repository so the minutes are free; the code it checks lives in the private wxtop repository (`cache/`).
 
-- **health.yml**, every 5 minutes (GitHub runs schedules late or skips some when it's busy): asks the cache what wxtop's page asks it,
+- **health.yml**, every 15 minutes (GitHub sometimes runs schedules late or skips one when busy): asks the cache what wxtop's page asks it,
   with the page's Origin.
   1. `/api/stats` answers.
   2. A METAR (KJFK) answers: aviationweather.gov is only reachable through the cache.

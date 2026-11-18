@@ -1,4 +1,4 @@
-# wxtop-cache health: every 5 minutes (GitHub often runs schedules late or skips some when busy), ask the cache what the page asks it (with the page's Origin) and fail loudly if it's broken.
+# wxtop-cache health: every 15 minutes (GitHub sometimes runs schedules late or skips one when busy), ask the cache what the page asks it (with the page's Origin) and fail loudly if it's broken.
 # A failed run emails whoever last changed this schedule (GitHub's own notification for scheduled workflows).
 # Checks: /api/stats answers; a METAR (only reachable through the cache) answers; a deliberate miss is fetched and answered.
 # A readable error from the cache itself on the miss (the service was slow or refused) is a warning, not a failure:
@@ -6,7 +6,7 @@
 name: cache health
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
 permissions:
   contents: read
